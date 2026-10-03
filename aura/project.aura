@@ -419,10 +419,13 @@
         "看小兽\n")
       (glyphlings:big want)
       (if (and (string? want) (= (string-length want) 1))
-        (if (and (string? mode) (string=? mode "word"))
-          (string-append "按完这三个字母，小兽才长齐\n"
+        (if (and (string? mode) (string=? mode "coach"))
+          (string-append "按完这几个字母，小兽才长齐\n"
                          (glyphlings:spell word progress) "\n")
-          "按这一个字母，小兽就出来\n")
+          (if (and (string? mode) (string=? mode "word"))
+            (string-append "按完这三个字母，小兽才长齐\n"
+                           (glyphlings:spell word progress) "\n")
+            "按这一个字母，小兽就出来\n"))
         "")
       head " " body " " tail "   " label "\n"
       zoo "\n"

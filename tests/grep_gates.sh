@@ -5,8 +5,20 @@ if grep -nE '\b(cat|dog|bee|sun|fox|pig|hen|ant|zoo|scene|score)\b' display/*.c;
   echo "GLYPHLINGS_FAIL display word"
   exit 1
 fi
-if grep -nE '\(eval |\(load |\(shell |http-get|http-post|std/llm|std/net|pheromone:init|security:grant-capability!' aura/*.aura; then
+if grep -nE '\(eval |\(load |\(shell |http-get|std/net|pheromone:init|security:grant-capability!' aura/*.aura; then
   echo "GLYPHLINGS_FAIL banned call"
+  exit 1
+fi
+if grep -nE 'http-post|std/llm' aura/*.aura | grep -v 'aura/coach.aura'; then
+  echo "GLYPHLINGS_FAIL llm outside coach"
+  exit 1
+fi
+if ! grep -q 'std/llm' aura/coach.aura; then
+  echo "GLYPHLINGS_FAIL coach missing llm"
+  exit 1
+fi
+if ! grep -q 'http-post' aura/coach.aura; then
+  echo "GLYPHLINGS_FAIL coach missing post"
   exit 1
 fi
 rep=$(grep -n 'mutate:replace-value' aura/*.aura || true)

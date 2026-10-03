@@ -1,0 +1,75 @@
+(require "aura/driver" all:)
+
+(define *bad* #f)
+(define (ok? label yes)
+  (if (equal? yes #t)
+    #t
+    (begin
+      (display "GLYPHLINGS_FAIL ")
+      (display label)
+      (newline)
+      (set! *bad* #t))))
+
+(ok? "coach-off" (equal? (glyphlings:coach-on?) #f))
+
+(define got (glyphlings:coach-line "star|星星|⭐"))
+(ok? "word" (and (pair? got) (string=? (car got) "star")))
+(ok? "label" (and (pair? got) (pair? (cdr got))
+                  (string=? (car (cdr got)) "星星")))
+(ok? "mark" (and (pair? got) (pair? (cdr got)) (pair? (cdr (cdr got)))
+                 (string=? (car (cdr (cdr got))) "⭐")))
+
+(define folded (glyphlings:coach-line "STAR|星星|⭐"))
+(ok? "fold" (and (pair? folded) (string=? (car folded) "star")))
+
+(define apple (glyphlings:coach-line "noise\napple|苹果|🍎\n"))
+(ok? "apple" (and (pair? apple) (string=? (car apple) "apple")))
+
+(ok? "reject-plain" (equal? (glyphlings:coach-line "nope") #f))
+(ok? "reject-short" (equal? (glyphlings:coach-line "ab|字|⭐") #f))
+(ok? "reject-long" (equal? (glyphlings:coach-line "planet|星星|⭐") #f))
+(ok? "reject-ascii-label" (equal? (glyphlings:coach-line "star|x|⭐") #f))
+(ok? "reject-ascii-mark" (equal? (glyphlings:coach-line "star|星星|s") #f))
+(ok? "reject-three" (equal? (glyphlings:coach-line "star|星星|⭐|再") #f))
+
+(ok? "install" (equal? (glyphlings:install! "aura/seed.aura") #t))
+(define pairs (list
+  (list "spawn-mode" (glyphlings:quote-src "coach"))
+  (list "creature-word" (glyphlings:quote-src "star"))
+  (list "creature-label" (glyphlings:quote-src "星星"))
+  (list "creature-body" (glyphlings:quote-src "⭐"))
+  (list "expect" (glyphlings:frozen "letter-s"))
+  (list "progress" "0")))
+(ok? "commit" (equal? (glyphlings:commit! pairs) #t))
+(ok? "cell-word" (string=? (glyphlings:cell "creature-word") "star"))
+(ok? "cell-mode" (string=? (glyphlings:cell "spawn-mode") "coach"))
+(ok? "cell-body" (string=? (glyphlings:cell "creature-body") "⭐"))
+(ok? "cell-label" (string=? (glyphlings:cell "creature-label") "星星"))
+(ok? "cell-expect" (string=? (glyphlings:cell "expect") "s"))
+(ok? "cell-kind" (string=? (glyphlings:cell "creature-kind") "cat"))
+
+(glyphlings:on-line "s")
+(ok? "step-t" (string=? (glyphlings:cell "expect") "t"))
+(ok? "step-1" (= (glyphlings:cell "progress") 1))
+(ok? "mark-stays" (string=? (glyphlings:cell "creature-body") "⭐"))
+
+(glyphlings:on-line "\x7f")
+(ok? "back-s" (string=? (glyphlings:cell "expect") "s"))
+(ok? "back-0" (= (glyphlings:cell "progress") 0))
+(ok? "mark-kept" (string=? (glyphlings:cell "creature-body") "⭐"))
+
+(glyphlings:on-line "s")
+(glyphlings:on-line "t")
+(glyphlings:on-line "a")
+(glyphlings:on-line "r")
+(define hatched (current-source :workspace))
+(ok? "fell-back" (string=? (glyphlings:inner hatched "spawn-mode") "letter"))
+(ok? "next-dog" (string=? (glyphlings:inner hatched "creature-kind") "dog"))
+(ok? "epoch-1" (= (glyphlings:num hatched "epoch") 1))
+(ok? "zoo-mark" (string=? (glyphlings:inner hatched "zoo") "⭐"))
+(ok? "swapped" (glyphlings:contains?
+                 (glyphlings:value-src hatched "next-spawn") "dog"))
+
+(if (equal? *bad* #t)
+  (display "GLYPHLINGS_FAIL\n")
+  (display "GLYPHLINGS_OK\n"))

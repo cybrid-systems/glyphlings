@@ -19,8 +19,20 @@ display/glyphlings-tty: display/glyphlings-tty.c
 
 run: display/glyphlings-tty
 	mkdir -p runtime
-	./display/glyphlings-tty
+	@export LLM_MODEL="$${LLM_MODEL:-deepseek-flash}"; \
+	export LLM_BASE_URL="$${LLM_BASE_URL:-https://api.deepseek.com}"; \
+	export GLYPHLINGS_COACH="$${GLYPHLINGS_COACH:-1}"; \
+	if [ -z "$${LLM_API_KEY:-}" ] && [ -f /home/dev/code/keys/deepseek ]; then \
+	  export LLM_API_KEY="$$(tr -d ' \r\n' < /home/dev/code/keys/deepseek)"; \
+	fi; \
+	exec ./display/glyphlings-tty
 
 line: doctor
 	mkdir -p runtime
-	$(AURA_BIN) aura/main.aura
+	@export LLM_MODEL="$${LLM_MODEL:-deepseek-flash}"; \
+	export LLM_BASE_URL="$${LLM_BASE_URL:-https://api.deepseek.com}"; \
+	export GLYPHLINGS_COACH="$${GLYPHLINGS_COACH:-1}"; \
+	if [ -z "$${LLM_API_KEY:-}" ] && [ -f /home/dev/code/keys/deepseek ]; then \
+	  export LLM_API_KEY="$$(tr -d ' \r\n' < /home/dev/code/keys/deepseek)"; \
+	fi; \
+	exec "$(AURA_BIN)" aura/main.aura

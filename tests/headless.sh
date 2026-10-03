@@ -6,6 +6,8 @@ export AURA_PATH="${AURA_PATH:-/home/dev/code/grok-dev/aura-grok/lib}"
 export AURA_SANDBOX=off
 export AURA_PIPELINE_STRICT="${AURA_PIPELINE_STRICT:-force-soa}"
 export GLYPHLINGS_FAST=1
+export GLYPHLINGS_COACH=0
+export GLYPHLINGS_SNAP="${GLYPHLINGS_SNAP:-${TMPDIR:-/tmp}/glyphlings-suite-snap}"
 if [ ! -x "$AURA_BIN" ]; then
   echo "找不到 Aura 二进制：$AURA_BIN"
   exit 127
@@ -24,6 +26,7 @@ run tests/refuse.aura
 run tests/backspace.aura
 run tests/refuse_pheromone.aura
 run tests/hatch_heal.aura
+run tests/coach.aura
 echo "== grep =="
 if sh tests/grep_gates.sh; then
   true

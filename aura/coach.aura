@@ -1,0 +1,144 @@
+; Ask DeepSeek for the next word. The key stays in the environment.
+; A valid line is copied into the live literal by the driver.
+; This module never mutates the workspace.
+
+(export glyphlings:coach-on? glyphlings:coach-line glyphlings:coach-mark?
+        glyphlings:coach-word? glyphlings:coach-label? glyphlings:coach-next)
+
+(require "std/llm" all:)
+(require "aura/project" all:)
+
+(define (glyphlings:coach-on?)
+  (let ((flag (getenv "GLYPHLINGS_COACH"))
+        (key (getenv "LLM_API_KEY")))
+    (and (string? flag) (string=? flag "1")
+         (string? key) (> (string-length key) 0))))
+
+(define (glyphlings:trim s)
+  (if (not (string? s))
+    ""
+    (let ((n (string-length s)) (i 0) (j n))
+      (while (lambda () (and (< i j) (= (string-ref s i) 32)))
+        (lambda () (set! i (+ i 1))))
+      (while (lambda () (and (> j i) (= (string-ref s (- j 1)) 32)))
+        (lambda () (set! j (- j 1))))
+      (substring s i j))))
+
+(define (glyphlings:fold-word s)
+  (let ((n (string-length s)) (i 0) (acc "") (ok #t))
+    (while (lambda () (and (equal? ok #t) (< i n)))
+      (lambda ()
+        (let ((c (string-ref s i)))
+          (if (and (>= c 65) (<= c 90))
+            (set! acc (string-append acc
+                        (substring "abcdefghijklmnopqrstuvwxyz" (- c 65) (+ (- c 65) 1))))
+            (if (and (>= c 97) (<= c 122))
+              (set! acc (string-append acc (substring s i (+ i 1))))
+              (set! ok #f))))
+        (set! i (+ i 1))))
+    (if (equal? ok #t) acc #f)))
+
+(define (glyphlings:coach-word? s)
+  (and (string? s) (>= (string-length s) 3) (<= (string-length s) 5)
+       (let ((w (glyphlings:fold-word s)))
+         (and (string? w) (string=? w s)))))
+
+(define (glyphlings:coach-label? s)
+  (let ((n (if (string? s) (string-length s) 0)) (i 0) (ok #t))
+    (if (or (< n 1) (> n 18))
+      #f
+      (begin
+        (while (lambda () (and (equal? ok #t) (< i n)))
+          (lambda ()
+            (if (> (string-ref s i) 126) #t (set! ok #f))
+            (set! i (+ i 1))))
+        (equal? ok #t)))))
+
+(define (glyphlings:coach-mark? s)
+  (let ((n (if (string? s) (string-length s) 0)) (i 0) (ok #t))
+    (if (or (< n 1) (> n 16))
+      #f
+      (begin
+        (while (lambda () (and (equal? ok #t) (< i n)))
+          (lambda ()
+            (if (> (string-ref s i) 126) #t (set! ok #f))
+            (set! i (+ i 1))))
+        (equal? ok #t)))))
+
+(define (glyphlings:first-bar-line text)
+  (let ((n (string-length text)) (i 0) (start 0) (found #f))
+    (while (lambda () (and (equal? found #f) (<= i n)))
+      (lambda ()
+        (if (or (= i n) (= (string-ref text i) 10))
+          (let ((line (substring text start i)))
+            (if (glyphlings:contains? line "|")
+              (set! found line)
+              (set! start (+ i 1))))
+          #t)
+        (set! i (+ i 1))))
+    found))
+
+(define (glyphlings:coach-line text)
+  (if (not (string? text))
+    #f
+    (let ((line (glyphlings:first-bar-line text)))
+      (if (not (string? line))
+        #f
+        (let ((a (glyphlings:index line "|" 0)))
+          (if (< a 0)
+            #f
+            (let ((b (glyphlings:index line "|" (+ a 1))))
+              (if (or (< b 0) (>= (glyphlings:index line "|" (+ b 1)) 0))
+                #f
+                (let ((word (glyphlings:fold-word (glyphlings:trim (substring line 0 a))))
+                      (label (glyphlings:trim (substring line (+ a 1) b)))
+                      (mark (glyphlings:trim (substring line (+ b 1) (string-length line)))))
+                  (if (and (glyphlings:coach-word? word)
+                           (glyphlings:coach-label? label)
+                           (glyphlings:coach-mark? mark))
+                    (list word label mark)
+                    #f))))))))))
+
+(define (glyphlings:coach-url)
+  (let ((base (getenv "LLM_BASE_URL")))
+    (if (and (string? base) (> (string-length base) 0))
+      (string-append base "/chat/completions")
+      "https://api.deepseek.com/chat/completions")))
+
+(define (glyphlings:coach-body seen extra)
+  (let ((avoid (if (string? seen) seen ""))
+        (more (if (string? extra) extra "")))
+    (string-append
+      "{\"model\":\"deepseek-flash\",\"max_tokens\":80,\"thinking\":{\"type\":\"disabled\"},\"messages\":["
+      "{\"role\":\"system\",\"content\":\"你给六七岁的孩子出一道打字题。只回复一行，三段用竖线隔开：英文小写单词、中文名、一个表情。不要解释，不要引号。\"},"
+      "{\"role\":\"user\",\"content\":\"单词3到5个字母，是孩子认识的东西。中文名2到4个字。不要用这些词： "
+      avoid more
+      "\"}]}")))
+
+(define (glyphlings:fresh? seen word)
+  (not (glyphlings:contains? (string-append " " seen " ")
+                             (string-append " " word " "))))
+
+(define (glyphlings:coach-once seen extra)
+  (if (not (equal? (glyphlings:coach-on?) #t))
+    #f
+    (let ((key (getenv "LLM_API_KEY")))
+      (let ((raw (try
+                   (http-post (glyphlings:coach-url) (glyphlings:coach-body seen extra) key)
+                   (catch (e) ""))))
+        (if (not (and (string? raw) (> (string-length raw) 0)))
+          #f
+          (let ((parsed (llm:parse-response raw)))
+            (if (and (hash? parsed) (equal? (hash-ref parsed "ok") #t))
+              (glyphlings:coach-line (hash-ref parsed "content"))
+              #f)))))))
+
+(define (glyphlings:coach-next seen)
+  (let ((s (if (string? seen) seen "")))
+    (let ((a (glyphlings:coach-once s "")))
+      (if (and (pair? a) (equal? (glyphlings:fresh? s (car a)) #t))
+        a
+        (let ((b (glyphlings:coach-once s " 换一个，不要和上面重复。")))
+          (if (and (pair? b) (equal? (glyphlings:fresh? s (car b)) #t))
+            b
+            #f))))))
