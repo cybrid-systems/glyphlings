@@ -158,6 +158,7 @@ int main(void) {
     const char *bin;
     GlyphFrame st;
     int sent_small = 0;
+    int busy = 0;
 
     if (!isatty(STDIN_FILENO)) {
         fprintf(stderr, "请在终端里玩\n");
@@ -223,6 +224,7 @@ int main(void) {
             if (n <= 0)
                 break;
             write_all(STDOUT_FILENO, buf, (size_t)n);
+            busy = 0;
         }
         if (FD_ISSET(STDIN_FILENO, &rd)) {
             unsigned char b;
@@ -230,6 +232,11 @@ int main(void) {
             char line[16];
             if (n <= 0)
                 break;
+            /* One key at a time. Growing the animal recompiles the workspace. */
+            if (busy) {
+                glyphlings_frame_init(&st);
+                continue;
+            }
             if (!rows_ok()) {
                 if (!sent_small) {
                     write_all(to_child[1], "!\n", 2);
@@ -238,8 +245,12 @@ int main(void) {
                 continue;
             }
             sent_small = 0;
-            if (glyphlings_frame(&st, b, line, sizeof line) == 1)
+            if (glyphlings_frame(&st, b, line, sizeof line) == 1) {
+                static const char ack[] = "\x1b[15;1H\x1b[32m按到啦，等一等\x1b[0m";
+                write_all(STDOUT_FILENO, ack, sizeof ack - 1);
                 write_all(to_child[1], line, strlen(line));
+                busy = 1;
+            }
         }
     }
 

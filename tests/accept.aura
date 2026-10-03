@@ -15,7 +15,7 @@
 (ok? "install" (equal? (glyphlings:install! "tests/fixtures/cat-word.aura") #t))
 (define epoch0 (stats:get "compile:epoch"))
 (define t0 (monotonic-ms))
-(glyphlings:on-line "c")
+(glyphlings:on-line "C")
 (define src (current-source :workspace))
 (display (mutate:last-info))
 (newline)

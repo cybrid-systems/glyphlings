@@ -391,23 +391,26 @@
                 (if (string=? *banner* "") (set! *wobble* #t) #t)))))))))
 
 (define (glyphlings:on-byte line)
-  (let ((c (string-ref line 0))
-        (src (current-source :workspace)))
-    (cond
-      ((or (= c 0) (= c 13)) (set! *wobble* #f))
-      ((or (= c 8) (= c 127)) (glyphlings:backspace!))
-      ((and (>= c 97) (<= c 122))
-       (let ((want (glyphlings:inner src "expect")))
-         (if (and (string? want) (string=? line want) (> (string-length want) 0))
-           (glyphlings:accept!)
-           (begin
-             (if (and (string? want) (= (string-length want) 1))
+  (let ((c (string-ref line 0)))
+    (if (and (>= c 65) (<= c 90))
+      (glyphlings:on-byte (substring "abcdefghijklmnopqrstuvwxyz"
+                                     (- c 65) (+ (- c 65) 1)))
+      (let ((src (current-source :workspace)))
+        (cond
+          ((or (= c 0) (= c 13)) (set! *wobble* #f))
+          ((or (= c 8) (= c 127)) (glyphlings:backspace!))
+          ((and (>= c 97) (<= c 122))
+           (let ((want (glyphlings:inner src "expect")))
+             (if (and (string? want) (string=? line want) (> (string-length want) 0))
+               (glyphlings:accept!)
                (begin
-                 (pheromone:update want 1.0)
-                 (glyphlings:miss-bump want))
-               #t)
-             (set! *wobble* #t)))))
-      (#t (set! *wobble* #t)))))
+                 (if (and (string? want) (= (string-length want) 1))
+                   (begin
+                     (pheromone:update want 1.0)
+                     (glyphlings:miss-bump want))
+                   #t)
+                 (set! *wobble* #t)))))
+          (#t (set! *wobble* #t)))))))
 
 (define (glyphlings:on-line line)
   (if (not (string? line))

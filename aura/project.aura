@@ -238,11 +238,18 @@
       "我们再玩这一只\n"
       (string-append
         "\x1b[H\x1b[2J"
+        (if (and (string? want) (= (string-length want) 1))
+          (string-append "\x1b[1m请按这个键  " want "\x1b[0m\n\n")
+          "看小兽\n\n")
         "\x1b[33m" (glyphlings:big want) "\x1b[0m\n"
         head " " body " " tail "   " label "\n"
         zoo "\n"
         (if (and (string? banner) (> (string-length banner) 0))
           (string-append banner "\n")
           "")
-        (if (equal? wobble #t) "再试一次\n" "")
+        (if (equal? wobble #t)
+          (if (and (string? want) (= (string-length want) 1))
+            (string-append "再试一次，按 " want "\n")
+            "再试一次\n")
+          "")
         "\x1b[2m" (glyphlings:tricky misses) "\x1b[0m\n"))))
