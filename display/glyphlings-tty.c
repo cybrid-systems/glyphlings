@@ -125,7 +125,7 @@ static int rows_ok(void) {
     struct winsize ws;
     if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) != 0)
         return 1;
-    return ws.ws_row >= 16;
+    return ws.ws_row >= 24;
 }
 
 static void write_all(int fd, const char *p, size_t n) {

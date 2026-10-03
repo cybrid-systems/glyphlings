@@ -174,6 +174,27 @@
 (define *glyph-inv* #f)
 (define *glyph-kinds* #f)
 (define *glyph-glyphs* #f)
+(define *ink-paint* #f)
+
+(define (glyphlings:paint-mask mask)
+  (if (or (not (string? mask)) (not (= (string-length mask) 120)))
+    ""
+    (let ((row 0) (acc ""))
+      (while (lambda () (< row 12))
+        (lambda ()
+          (let ((col 0)
+                (line "\x1b[48;2;18;32;64m\x1b[38;2;255;220;90m ")
+                (base (* row 10)))
+            (while (lambda () (< col 10))
+              (lambda ()
+                (set! line (string-append line
+                             (if (= (string-ref mask (+ base col)) 49)
+                               "██"
+                               "  ")))
+                (set! col (+ col 1))))
+            (set! acc (string-append acc line " \x1b[0m\n")))
+          (set! row (+ row 1))))
+      acc)))
 
 (define (glyphlings:kind-list src)
   (if (pair? *glyph-kinds*)
@@ -197,6 +218,7 @@
       (glyphlings:starts? name "word-")
       (glyphlings:starts? name "label-")
       (glyphlings:starts? name "part-")
+      (glyphlings:starts? name "ink-")
       (glyphlings:starts? name "body-")
       (glyphlings:starts? name "stage0-")
       (string=? name "expect-blank")
@@ -208,7 +230,8 @@
         (i 0)
         (tab (hash))
         (kinds (list))
-        (glyphs (list)))
+        (glyphs (list))
+        (ink (hash)))
     (while (lambda () (< i n))
       (lambda ()
         (if (and (= (string-ref src i) 40)
@@ -231,6 +254,13 @@
                     #t)
                   (if (and (glyphlings:starts? name "part-") (string? body))
                     (set! glyphs (cons (glyphlings:strip body) glyphs))
+                    #t)
+                  (if (and (glyphlings:starts? name "ink-") (string? body))
+                    (let ((ch (substring name 4 (string-length name)))
+                          (mask (glyphlings:strip body)))
+                      (if (and (= (string-length ch) 1) (string? mask))
+                        (hash-set! ink ch (glyphlings:paint-mask mask))
+                        #t))
                     #t))
                 #t))
             (set! i (+ j 1)))
@@ -238,6 +268,7 @@
     (set! *glyph-kinds* (reverse kinds))
     (set! *glyph-glyphs* glyphs)
     (set! *glyph-inv* tab)
+    (set! *ink-paint* ink)
     #t))
 
 (define (glyphlings:define-names src)
@@ -325,25 +356,31 @@
 
 (define (glyphlings:big ch)
   (if (or (not (string? ch)) (not (= (string-length ch) 1)))
-    "     \n     \n     \n     \n     "
-    (cond
-      ((string=? ch "a") " ### \n#   #\n#####\n#   #\n#   #")
-      ((string=? ch "b") "#### \n#   #\n#### \n#   #\n#### ")
-      ((string=? ch "c") " ### \n#    \n#    \n#    \n ### ")
-      ((string=? ch "d") "###  \n#  # \n#   #\n#  # \n###  ")
-      ((string=? ch "e") "#####\n#    \n#### \n#    \n#####")
-      ((string=? ch "f") "#####\n#    \n#### \n#    \n#    ")
-      ((string=? ch "g") " ### \n#    \n#  ##\n#   #\n ### ")
-      ((string=? ch "h") "#   #\n#   #\n#####\n#   #\n#   #")
-      ((string=? ch "i") "#####\n  #  \n  #  \n  #  \n#####")
-      ((string=? ch "n") "#   #\n##  #\n# # #\n#  ##\n#   #")
-      ((string=? ch "o") " ### \n#   #\n#   #\n#   #\n ### ")
-      ((string=? ch "p") "#### \n#   #\n#### \n#    \n#    ")
-      ((string=? ch "s") " ####\n#    \n ### \n    #\n#### ")
-      ((string=? ch "t") "#####\n  #  \n  #  \n  #  \n  #  ")
-      ((string=? ch "u") "#   #\n#   #\n#   #\n#   #\n ### ")
-      ((string=? ch "x") "#   #\n # # \n  #  \n # # \n#   #")
-      (#t (string-append ch "\n" ch "\n" ch "\n" ch "\n" ch)))))
+    ""
+    (let ((hit (if (hash? *ink-paint*) (hash-ref *ink-paint* ch) #f)))
+      (if (string? hit)
+        hit
+        (let ((mask (glyphlings:strip
+                      (glyphlings:frozen (string-append "ink-" ch)))))
+          (if (string? mask) (glyphlings:paint-mask mask) ""))))))
+
+(define (glyphlings:spell word progress)
+  (if (or (not (string? word)) (< (string-length word) 2) (not (number? progress))
+          (< progress 0))
+    ""
+    (let ((i 0) (n (string-length word)) (acc ""))
+      (while (lambda () (< i n))
+        (lambda ()
+          (let ((ch (substring word i (+ i 1))))
+            (if (> i 0) (set! acc (string-append acc "  ")) #t)
+            (set! acc (string-append acc
+                        (if (= i progress)
+                          (string-append "\x1b[1m\x1b[33m" ch "\x1b[0m")
+                          (if (< i progress)
+                            (string-append "\x1b[32m" ch "\x1b[0m")
+                            (string-append "\x1b[2m" ch "\x1b[0m"))))))
+          (set! i (+ i 1))))
+      acc)))
 
 (define (glyphlings:tricky misses)
   (let ((az "abcdefghijklmnopqrstuvwxyz")
@@ -371,16 +408,22 @@
                      (if (> n2 0) (string-append " " best2) "")
                      (if (> n3 0) (string-append " " best3) "")))))
 
-(define (glyphlings:picture want head body tail label zoo wobble banner misses)
+(define (glyphlings:picture want head body tail label zoo wobble banner misses word mode progress)
   (if (or (not (string? head)) (not (string? want)) (not (string? body))
           (not (string? tail)) (not (string? label)) (not (string? zoo)))
     "我们再玩这一只\n"
     (string-append
       "\x1b[H\x1b[2J"
       (if (and (string? want) (= (string-length want) 1))
-        (string-append "\x1b[1m请按这个键  " want "\x1b[0m\n\n")
-        "看小兽\n\n")
-      "\x1b[33m" (glyphlings:big want) "\x1b[0m\n"
+        (string-append "\x1b[1m请按这个键  " want "\x1b[0m\n")
+        "看小兽\n")
+      (glyphlings:big want)
+      (if (and (string? want) (= (string-length want) 1))
+        (if (and (string? mode) (string=? mode "word"))
+          (string-append "按完这三个字母，小兽才长齐\n"
+                         (glyphlings:spell word progress) "\n")
+          "按这一个字母，小兽就出来\n")
+        "")
       head " " body " " tail "   " label "\n"
       zoo "\n"
       (if (and (string? banner) (> (string-length banner) 0))
@@ -401,4 +444,7 @@
     (glyphlings:inner src "creature-tail")
     (glyphlings:inner src "creature-label")
     (glyphlings:inner src "zoo")
-    wobble banner misses))
+    wobble banner misses
+    (glyphlings:inner src "creature-word")
+    (glyphlings:inner src "spawn-mode")
+    (glyphlings:num src "progress")))

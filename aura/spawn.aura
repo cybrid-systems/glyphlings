@@ -1,5 +1,8 @@
 ; Next animal is one of the 16 lambdas already in the workspace.
 ; The kind order is the order of label-* in that same source.
+; Epoch below 2 and no misses: the next kind, one letter.
+; Epoch 2 or more and no misses: the next kind, the whole word.
+; A miss picks the word that contains the hottest letter.
 
 (export glyphlings:choose glyphlings:commit-spawn!)
 
@@ -82,7 +85,7 @@
                 (set! step (+ step 1))))))))
     (if (string? found) (list found "word") (list k "word"))))
 
-(define (glyphlings:choose src misses kind)
+(define (glyphlings:choose src misses kind epoch)
   (let ((kinds (glyphlings:kind-list src)))
     (if (glyphlings:all-zero? misses)
       (let ((idx (glyphlings:kind-index kinds kind 0)))
@@ -90,7 +93,9 @@
                      (glyphlings:nth kinds (if (>= (+ idx 1) (glyphlings:count kinds))
                                             0
                                             (+ idx 1))))))
-          (list nxt "letter")))
+          (if (and (number? epoch) (>= epoch 2))
+            (list nxt "word")
+            (list nxt "letter"))))
       (let ((hot (glyphlings:hot misses)))
         (let ((best (glyphlings:best kinds misses hot src)))
           (if (not (string? best))
