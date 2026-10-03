@@ -254,13 +254,6 @@
                     #t)
                   (if (and (glyphlings:starts? name "part-") (string? body))
                     (set! glyphs (cons (glyphlings:strip body) glyphs))
-                    #t)
-                  (if (and (glyphlings:starts? name "ink-") (string? body))
-                    (let ((ch (substring name 4 (string-length name)))
-                          (mask (glyphlings:strip body)))
-                      (if (and (= (string-length ch) 1) (string? mask))
-                        (hash-set! ink ch (glyphlings:paint-mask mask))
-                        #t))
                     #t))
                 #t))
             (set! i (+ j 1)))
@@ -362,7 +355,13 @@
         hit
         (let ((mask (glyphlings:strip
                       (glyphlings:frozen (string-append "ink-" ch)))))
-          (if (string? mask) (glyphlings:paint-mask mask) ""))))))
+          (if (not (string? mask))
+            ""
+            (let ((pic (glyphlings:paint-mask mask)))
+              (if (and (hash? *ink-paint*) (string? pic))
+                (hash-set! *ink-paint* ch pic)
+                #t)
+              pic)))))))
 
 (define (glyphlings:spell word progress)
   (if (or (not (string? word)) (< (string-length word) 2) (not (number? progress))

@@ -28,6 +28,7 @@
 (define *key-t0* 0)
 (define *key-ms* 0)
 (define *coach-seen* "cat dog bee sun fox pig hen ant")
+(define *seed-names* #f)
 
 (define (glyphlings:key-ms) *key-ms*)
 
@@ -732,24 +733,32 @@
       (glyphlings:remember-coach! word)
       #t)))
 
+(define (glyphlings:seed-names)
+  (if (pair? *seed-names*)
+    *seed-names*
+    (let ((seed (read-file "aura/seed.aura")))
+      (if (not (string? seed))
+        (list)
+        (let ((names (glyphlings:define-names seed)))
+          (set! *seed-names* names)
+          names)))))
+
+; A mismatched snap used to deserialize, then fail the name check.
+; body-coach-word is in the current seed, so a miss is already a mismatch.
 (define (glyphlings:try-session path)
   (let ((blob (read-file path)))
     (if (not (string? blob))
       #f
       (let ((section (glyphlings:source-section blob)))
-        (if (or (not (string? section)) (glyphlings:tripped? section))
+        (if (or (not (string? section))
+                (< (string-index section "(define body-coach-word" 0) 0))
           #f
-          (if (not (equal? (deserialize-workspace path) #t))
+          (if (or (glyphlings:tripped? section)
+                  (not (glyphlings:same-names?
+                         (glyphlings:define-names section)
+                         (glyphlings:seed-names))))
             #f
-            (let ((seed (read-file "aura/seed.aura")))
-              (if (and (string? seed)
-                       (glyphlings:same-names?
-                         (glyphlings:define-names (current-source :workspace))
-                         (glyphlings:define-names seed)))
-                #t
-                (begin
-                  (if (string? seed) (begin (set-code seed) (eval-current)) #f)
-                  #f)))))))))
+            (equal? (deserialize-workspace path) #t)))))))
 
 (define (glyphlings:save)
   (let ((w (serialize-workspace (glyphlings:snap-writing))))

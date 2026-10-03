@@ -159,6 +159,8 @@ int main(void) {
     GlyphFrame st;
     int sent_small = 0;
     int busy = 0;
+    int seen = 0;
+    static const char wake[] = "\x1b[H\x1b[2J\x1b[1m小兽正在醒，等一等\x1b[0m\n";
 
     if (!isatty(STDIN_FILENO)) {
         fprintf(stderr, "请在终端里玩\n");
@@ -197,6 +199,7 @@ int main(void) {
     signal(SIGPIPE, SIG_IGN);
     atexit(restore_tty);
     enter_raw();
+    write_all(STDOUT_FILENO, wake, sizeof wake - 1);
     mkdir_runtime();
     glyphlings_frame_init(&st);
 
@@ -225,6 +228,7 @@ int main(void) {
                 break;
             write_all(STDOUT_FILENO, buf, (size_t)n);
             busy = 0;
+            seen = 1;
         }
         if (FD_ISSET(STDIN_FILENO, &rd)) {
             unsigned char b;
@@ -232,6 +236,9 @@ int main(void) {
             char line[16];
             if (n <= 0)
                 break;
+            /* Boot paints the first frame. Keys before that would sit in the pipe. */
+            if (!seen)
+                continue;
             /* One key at a time. Growing the animal recompiles the workspace. */
             if (busy) {
                 glyphlings_frame_init(&st);
