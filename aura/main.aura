@@ -1,0 +1,4 @@
+; Child entry. Canonical mode (make line) or the byte pipe (make run).
+(require "aura/driver" all:)
+(glyphlings:boot)
+(glyphlings:loop)

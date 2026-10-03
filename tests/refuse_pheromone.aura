@@ -1,0 +1,24 @@
+(require "aura/driver" all:)
+(require "std/ant" all:)
+
+(define *bad* #f)
+(define (ok? label yes)
+  (if (equal? yes #t)
+    #t
+    (begin
+      (display "GLYPHLINGS_FAIL ")
+      (display label)
+      (newline)
+      (set! *bad* #t))))
+
+(ok? "install" (equal? (glyphlings:install! "tests/fixtures/cat-word.aura") #t))
+(define before (current-source :workspace))
+(define c0 (pheromone:score "c"))
+(define x0 (pheromone:score "x"))
+(glyphlings:on-line "x")
+(ok? "source" (equal? before (current-source :workspace)))
+(ok? "c-up" (> (pheromone:score "c") c0))
+(ok? "x-same" (= (pheromone:score "x") x0))
+(if (equal? *bad* #t)
+  (display "GLYPHLINGS_FAIL\n")
+  (display "GLYPHLINGS_OK\n"))

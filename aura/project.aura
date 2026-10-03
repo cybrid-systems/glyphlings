@@ -1,0 +1,248 @@
+; Projection and source slicing. No mutate, no word list, no scene id.
+; Picture fields are read back out of (current-source :workspace).
+
+(export glyphlings:index glyphlings:contains? glyphlings:parse-value
+        glyphlings:value-src glyphlings:inner glyphlings:strip glyphlings:num
+        glyphlings:kind-list glyphlings:big glyphlings:tricky
+        glyphlings:frame glyphlings:quote-src glyphlings:miss-get
+        glyphlings:define-names glyphlings:count glyphlings:name-in?
+        glyphlings:same-names?
+        glyphlings:u32 glyphlings:source-section)
+
+(define (glyphlings:index text substr start)
+  (let ((n (string-length text))
+        (m (string-length substr))
+        (i start)
+        (found -1))
+    (while (lambda () (and (< found 0) (<= i (- n m))))
+      (lambda ()
+        (if (string=? (substring text i (+ i m)) substr)
+          (set! found i)
+          (set! i (+ i 1)))))
+    found))
+
+(define (glyphlings:contains? text substr)
+  (not (= (glyphlings:index text substr 0) -1)))
+
+(define (glyphlings:parse-value src pos)
+  (let ((n (string-length src))
+        (c (string-ref src pos)))
+    (cond
+      ((= c 34)
+       (let ((j (+ pos 1)))
+         (while (lambda () (and (< j n) (not (= (string-ref src j) 34))))
+           (lambda () (set! j (+ j 1))))
+         (substring src pos (+ j 1))))
+      ((= c 40)
+       (let ((j pos) (depth 0) (inq #f))
+         (while (lambda () (and (< j n) (or (> depth 0) (= j pos))))
+           (lambda ()
+             (let ((ch (string-ref src j)))
+               (if (equal? inq #t)
+                 (if (= ch 34) (set! inq #f) #t)
+                 (cond
+                   ((= ch 34) (set! inq #t))
+                   ((= ch 40) (set! depth (+ depth 1)))
+                   ((= ch 41) (set! depth (- depth 1)))
+                   (#t #t))))
+             (set! j (+ j 1))))
+         (substring src pos j)))
+      (#t
+       (let ((j pos))
+         (while (lambda () (and (< j n)
+                                (not (= (string-ref src j) 32))
+                                (not (= (string-ref src j) 41))
+                                (not (= (string-ref src j) 10))))
+           (lambda () (set! j (+ j 1))))
+         (substring src pos j))))))
+
+(define (glyphlings:value-src src name)
+  (let ((key (string-append "(define " name " ")))
+    (let ((at (glyphlings:index src key 0)))
+      (if (< at 0)
+        #f
+        (glyphlings:parse-value src (+ at (string-length key)))))))
+
+(define (glyphlings:strip v)
+  (if (not (string? v))
+    #f
+    (if (and (>= (string-length v) 2) (= (string-ref v 0) 34))
+      (substring v 1 (- (string-length v) 1))
+      v)))
+
+(define (glyphlings:inner src name)
+  (glyphlings:strip (glyphlings:value-src src name)))
+
+(define (glyphlings:num src name)
+  (let ((v (glyphlings:inner src name)))
+    (if (not (string? v))
+      -1
+      (let ((n (string->number v)))
+        (if (number? n) n -1)))))
+
+(define (glyphlings:kind-list src)
+  (let ((pos 0) (acc (list)) (n (string-length src)))
+    (while (lambda () (>= pos 0))
+      (lambda ()
+        (let ((at (glyphlings:index src "(define label-" pos)))
+          (if (< at 0)
+            (set! pos -1)
+            (let ((start (+ at 14))
+                  (j (+ at 14)))
+              (while (lambda () (and (< j n) (not (= (string-ref src j) 32))))
+                (lambda () (set! j (+ j 1))))
+              (set! acc (cons (substring src start j) acc))
+              (set! pos j))))))
+    (reverse acc)))
+
+(define (glyphlings:define-names src)
+  (let ((pos 0) (acc (list)) (n (string-length src)))
+    (while (lambda () (>= pos 0))
+      (lambda ()
+        (let ((at (glyphlings:index src "(define " pos)))
+          (if (< at 0)
+            (set! pos -1)
+            (let ((start (+ at 8))
+                  (j (+ at 8)))
+              (while (lambda () (and (< j n)
+                                     (not (= (string-ref src j) 32))
+                                     (not (= (string-ref src j) 41))))
+                (lambda () (set! j (+ j 1))))
+              (set! acc (cons (substring src start j) acc))
+              (set! pos j))))))
+    (reverse acc)))
+
+(define (glyphlings:count xs)
+  (let ((n 0) (p xs))
+    (while (lambda () (pair? p))
+      (lambda ()
+        (set! n (+ n 1))
+        (set! p (cdr p))))
+    n))
+
+(define (glyphlings:name-in? name names)
+  (let ((xs names) (found #f))
+    (while (lambda () (and (equal? found #f) (pair? xs)))
+      (lambda ()
+        (if (string=? (car xs) name) (set! found #t) #t)
+        (set! xs (cdr xs))))
+    (equal? found #t)))
+
+(define (glyphlings:same-names? a b)
+  (if (not (= (glyphlings:count a) (glyphlings:count b)))
+    #f
+    (let ((p a) (ok #t))
+      (while (lambda () (and (equal? ok #t) (pair? p)))
+        (lambda ()
+          (if (glyphlings:name-in? (car p) b) #t (set! ok #f))
+          (set! p (cdr p))))
+      (equal? ok #t))))
+
+(define (glyphlings:u32 s i)
+  (if (> (+ i 4) (string-length s))
+    -1
+    (+ (string-ref s i)
+       (* 256 (string-ref s (+ i 1)))
+       (* 65536 (string-ref s (+ i 2)))
+       (* 16777216 (string-ref s (+ i 3))))))
+
+(define (glyphlings:source-section blob)
+  (if (or (not (string? blob)) (< (string-length blob) 24))
+    #f
+    (if (not (and (string=? (substring blob 0 8) "AURASOUL")
+                  (= (string-ref blob 8) 1)))
+      #f
+      (let ((pos 21) (guard 0) (found #f) (done #f))
+        (while (lambda () (and (equal? done #f) (< guard 8)))
+          (lambda ()
+            (let ((tag (glyphlings:u32 blob pos))
+                  (len (glyphlings:u32 blob (+ pos 4))))
+              (if (or (< tag 0) (< len 0) (> (+ pos 8 len) (string-length blob)))
+                (set! done #t)
+                (if (or (= tag 4294967295) (= tag 1))
+                  (begin
+                    (if (= tag 1)
+                      (set! found (substring blob (+ pos 8) (+ pos 8 len)))
+                      #t)
+                    (set! done #t))
+                  (set! pos (+ pos 8 len)))))
+            (set! guard (+ guard 1))))
+        found))))
+
+(define (glyphlings:quote-src s)
+  (string-append "\"" s "\""))
+
+(define (glyphlings:miss-get misses ch)
+  (if (not (hash? misses))
+    0
+    (let ((v (hash-ref misses ch)))
+      (if (number? v) v 0))))
+
+(define (glyphlings:big ch)
+  (if (or (not (string? ch)) (not (= (string-length ch) 1)))
+    "     \n     \n     \n     \n     "
+    (cond
+      ((string=? ch "a") " ### \n#   #\n#####\n#   #\n#   #")
+      ((string=? ch "b") "#### \n#   #\n#### \n#   #\n#### ")
+      ((string=? ch "c") " ### \n#    \n#    \n#    \n ### ")
+      ((string=? ch "d") "###  \n#  # \n#   #\n#  # \n###  ")
+      ((string=? ch "e") "#####\n#    \n#### \n#    \n#####")
+      ((string=? ch "f") "#####\n#    \n#### \n#    \n#    ")
+      ((string=? ch "g") " ### \n#    \n#  ##\n#   #\n ### ")
+      ((string=? ch "h") "#   #\n#   #\n#####\n#   #\n#   #")
+      ((string=? ch "i") "#####\n  #  \n  #  \n  #  \n#####")
+      ((string=? ch "n") "#   #\n##  #\n# # #\n#  ##\n#   #")
+      ((string=? ch "o") " ### \n#   #\n#   #\n#   #\n ### ")
+      ((string=? ch "p") "#### \n#   #\n#### \n#    \n#    ")
+      ((string=? ch "s") " ####\n#    \n ### \n    #\n#### ")
+      ((string=? ch "t") "#####\n  #  \n  #  \n  #  \n  #  ")
+      ((string=? ch "u") "#   #\n#   #\n#   #\n#   #\n ### ")
+      ((string=? ch "x") "#   #\n # # \n  #  \n # # \n#   #")
+      (#t (string-append ch "\n" ch "\n" ch "\n" ch "\n" ch)))))
+
+(define (glyphlings:tricky misses)
+  (let ((az "abcdefghijklmnopqrstuvwxyz")
+        (best1 "") (n1 0) (best2 "") (n2 0) (best3 "") (n3 0)
+        (i 0))
+    (while (lambda () (< i 26))
+      (lambda ()
+        (let ((ch (substring az i (+ i 1)))
+              (n (glyphlings:miss-get misses ch)))
+          (cond
+            ((> n n1)
+             (set! best3 best2) (set! n3 n2)
+             (set! best2 best1) (set! n2 n1)
+             (set! best1 ch) (set! n1 n))
+            ((> n n2)
+             (set! best3 best2) (set! n3 n2)
+             (set! best2 ch) (set! n2 n))
+            ((> n n3)
+             (set! best3 ch) (set! n3 n))
+            (#t #t)))
+        (set! i (+ i 1))))
+    (if (= n1 0)
+      "今天还没有容易错的字母"
+      (string-append "今天容易写错的字母：" best1
+                     (if (> n2 0) (string-append " " best2) "")
+                     (if (> n3 0) (string-append " " best3) "")))))
+
+(define (glyphlings:frame src wobble banner misses)
+  (let ((want (glyphlings:inner src "expect"))
+        (head (glyphlings:inner src "creature-head"))
+        (body (glyphlings:inner src "creature-body"))
+        (tail (glyphlings:inner src "creature-tail"))
+        (label (glyphlings:inner src "creature-label"))
+        (zoo (glyphlings:inner src "zoo")))
+    (if (or (not (string? head)) (not (string? want)) (not (string? body))
+            (not (string? tail)) (not (string? label)) (not (string? zoo)))
+      "我们再玩这一只\n"
+      (string-append
+        "\x1b[H\x1b[2J"
+        "\x1b[33m" (glyphlings:big want) "\x1b[0m\n"
+        head " " body " " tail "   " label "\n"
+        zoo "\n"
+        (if (and (string? banner) (> (string-length banner) 0))
+          (string-append banner "\n")
+          "")
+        (if (equal? wobble #t) "再试一次\n" "")
+        "\x1b[2m" (glyphlings:tricky misses) "\x1b[0m\n"))))

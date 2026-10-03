@@ -1,0 +1,20 @@
+(require "aura/driver" all:)
+(require "aura/project" all:)
+
+(define *bad* #f)
+(define (ok? label yes)
+  (if (equal? yes #t)
+    #t
+    (begin
+      (display "GLYPHLINGS_FAIL ")
+      (display label)
+      (newline)
+      (set! *bad* #t))))
+
+(glyphlings:boot)
+(define src (current-source :workspace))
+(ok? "epoch" (= (glyphlings:num src "epoch") 1))
+(ok? "zoo" (glyphlings:contains? (glyphlings:inner src "zoo") "🐱"))
+(if (equal? *bad* #t)
+  (display "GLYPHLINGS_FAIL\n")
+  (display "GLYPHLINGS_OK\n"))

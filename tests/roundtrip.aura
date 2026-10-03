@@ -1,0 +1,43 @@
+(require "aura/project" all:)
+
+(define *bad* #f)
+(define (ok? label yes)
+  (if (equal? yes #t)
+    #t
+    (begin
+      (display "GLYPHLINGS_FAIL ")
+      (display label)
+      (newline)
+      (set! *bad* #t))))
+
+(set-code (read-file "aura/seed.aura"))
+(eval-current)
+(define a (current-source :workspace))
+(set-code a)
+(eval-current)
+(define b (current-source :workspace))
+(ok? "roundtrip" (equal? a b))
+(ok? "expect-c" (string=? (glyphlings:inner b "expect") "c"))
+(ok? "kind-cat" (string=? (car (glyphlings:kind-list b)) "cat"))
+(ok? "eight" (= (glyphlings:count (glyphlings:kind-list b)) 8))
+
+(define glyphs (list "🐱" "🐈" "🐾" "🐶" "🐕" "🦴" "🐝" "🌸" "🍯"
+                     "☀️" "🌞" "✨" "🦊" "🔥" "🍂" "🐷" "🐖" "🩷"
+                     "🐔" "🥚" "🌾" "🐜" "🍃" "🏔️" "·"))
+(define (each gs)
+  (if (not (pair? gs))
+    #t
+    (begin
+      (if (glyphlings:contains? b (car gs))
+        #t
+        (begin
+          (display "GLYPHLINGS_FAIL glyph ")
+          (display (car gs))
+          (newline)
+          (set! *bad* #t)))
+      (each (cdr gs)))))
+(each glyphs)
+
+(if (equal? *bad* #t)
+  (display "GLYPHLINGS_FAIL\n")
+  (display "GLYPHLINGS_OK\n"))

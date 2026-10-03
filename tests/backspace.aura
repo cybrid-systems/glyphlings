@@ -1,0 +1,27 @@
+(require "aura/driver" all:)
+(require "aura/project" all:)
+
+(define *bad* #f)
+(define (ok? label yes)
+  (if (equal? yes #t)
+    #t
+    (begin
+      (display "GLYPHLINGS_FAIL ")
+      (display label)
+      (newline)
+      (set! *bad* #t))))
+
+(ok? "install" (equal? (glyphlings:install! "tests/fixtures/cat-word.aura") #t))
+(glyphlings:on-line "c")
+(glyphlings:on-line "\x08")
+(define src (current-source :workspace))
+(ok? "egg" (string=? (glyphlings:inner src "creature-head")
+                     (glyphlings:inner src "stage0-head")))
+(ok? "expect-c" (string=? (glyphlings:inner src "expect") "c"))
+(ok? "progress-0" (= (glyphlings:num src "progress") 0))
+(define before (current-source :workspace))
+(glyphlings:on-line "\x08")
+(ok? "still" (equal? before (current-source :workspace)))
+(if (equal? *bad* #t)
+  (display "GLYPHLINGS_FAIL\n")
+  (display "GLYPHLINGS_OK\n"))

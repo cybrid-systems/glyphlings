@@ -1,0 +1,25 @@
+(require "aura/driver" all:)
+(require "aura/project" all:)
+
+(define *bad* #f)
+(define (ok? label yes)
+  (if (equal? yes #t)
+    #t
+    (begin
+      (display "GLYPHLINGS_FAIL ")
+      (display label)
+      (newline)
+      (set! *bad* #t))))
+
+(ok? "install" (equal? (glyphlings:install! "tests/fixtures/cat-word.aura") #t))
+(define before (current-source :workspace))
+(glyphlings:on-line "x")
+(define after (current-source :workspace))
+(ok? "source" (equal? before after))
+(define frame (glyphlings:frame after #t "" (hash)))
+(ok? "wobble-line" (glyphlings:contains? frame "再试一次"))
+(ok? "egg" (glyphlings:contains? frame "🥚"))
+(ok? "no-lead-space" (not (= (string-ref frame 0) 32)))
+(if (equal? *bad* #t)
+  (display "GLYPHLINGS_FAIL\n")
+  (display "GLYPHLINGS_OK\n"))
