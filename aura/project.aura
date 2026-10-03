@@ -1,13 +1,19 @@
 ; Projection and source slicing. No mutate, no word list, no scene id.
-; Picture fields are read back out of (current-source :workspace).
+; glyphlings:frame slices a source string for tests.
+; Inventory literals never change: one walk caches them.
+; The playable picture is the single live literal. One incremental
+; replace of that literal is the whole keystroke.
 
 (export glyphlings:index glyphlings:contains? glyphlings:parse-value
         glyphlings:value-src glyphlings:inner glyphlings:strip glyphlings:num
         glyphlings:kind-list glyphlings:big glyphlings:tricky
-        glyphlings:frame glyphlings:quote-src glyphlings:miss-get
+        glyphlings:frame glyphlings:picture glyphlings:quote-src glyphlings:miss-get
         glyphlings:define-names glyphlings:count glyphlings:name-in?
         glyphlings:same-names?
-        glyphlings:u32 glyphlings:source-section)
+        glyphlings:u32 glyphlings:source-section
+        glyphlings:inventory-cache! glyphlings:frozen glyphlings:cached-glyphs
+        glyphlings:field-at glyphlings:split-bar glyphlings:nth
+        glyphlings:set-nth glyphlings:join-bar glyphlings:live-field)
 
 (define (glyphlings:index text substr start)
   (let ((n (string-length text))
@@ -70,8 +76,78 @@
       (substring v 1 (- (string-length v) 1))
       v)))
 
+(define (glyphlings:field-at name)
+  (cond
+    ((string=? name "creature-kind") 0)
+    ((string=? name "creature-word") 1)
+    ((string=? name "creature-label") 2)
+    ((string=? name "spawn-mode") 3)
+    ((string=? name "creature-head") 4)
+    ((string=? name "creature-body") 5)
+    ((string=? name "creature-tail") 6)
+    ((string=? name "expect") 7)
+    ((string=? name "progress") 8)
+    ((string=? name "epoch") 9)
+    ((string=? name "zoo") 10)
+    ((string=? name "pheromone-table") 11)
+    (#t -1)))
+
+(define (glyphlings:split-bar s)
+  (if (not (string? s))
+    #f
+    (let ((n (string-length s)) (i 0) (start 0) (acc (list)) (count 0))
+      (while (lambda () (<= i n))
+        (lambda ()
+          (if (or (= i n) (= (string-ref s i) 124))
+            (begin
+              (set! acc (cons (substring s start i) acc))
+              (set! count (+ count 1))
+              (set! start (+ i 1)))
+            #t)
+          (set! i (+ i 1))))
+      (if (= count 12) (reverse acc) #f))))
+
+(define (glyphlings:nth xs i)
+  (let ((p xs) (k 0) (found #f))
+    (while (lambda () (and (equal? found #f) (pair? p)))
+      (lambda ()
+        (if (= k i) (set! found (car p)) #t)
+        (set! k (+ k 1))
+        (set! p (cdr p))))
+    found))
+
+(define (glyphlings:set-nth xs i v)
+  (let ((p xs) (k 0) (acc (list)))
+    (while (lambda () (pair? p))
+      (lambda ()
+        (set! acc (cons (if (= k i) v (car p)) acc))
+        (set! k (+ k 1))
+        (set! p (cdr p))))
+    (reverse acc)))
+
+(define (glyphlings:join-bar fields)
+  (let ((p fields) (acc "") (first #t))
+    (while (lambda () (pair? p))
+      (lambda ()
+        (if (equal? first #t)
+          (set! first #f)
+          (set! acc (string-append acc "|")))
+        (set! acc (string-append acc (car p)))
+        (set! p (cdr p))))
+    acc))
+
+(define (glyphlings:live-field text name)
+  (let ((xs (glyphlings:split-bar text))
+        (i (glyphlings:field-at name)))
+    (if (and (pair? xs) (number? i) (>= i 0))
+      (glyphlings:nth xs i)
+      #f)))
+
 (define (glyphlings:inner src name)
-  (glyphlings:strip (glyphlings:value-src src name)))
+  (let ((i (glyphlings:field-at name)))
+    (if (and (number? i) (>= i 0))
+      (glyphlings:live-field (glyphlings:strip (glyphlings:value-src src "live")) name)
+      (glyphlings:strip (glyphlings:value-src src name)))))
 
 (define (glyphlings:num src name)
   (let ((v (glyphlings:inner src name)))
@@ -80,7 +156,7 @@
       (let ((n (string->number v)))
         (if (number? n) n -1)))))
 
-(define (glyphlings:kind-list src)
+(define (glyphlings:kind-list-scan src)
   (let ((pos 0) (acc (list)) (n (string-length src)))
     (while (lambda () (>= pos 0))
       (lambda ()
@@ -94,6 +170,75 @@
               (set! acc (cons (substring src start j) acc))
               (set! pos j))))))
     (reverse acc)))
+
+(define *glyph-inv* #f)
+(define *glyph-kinds* #f)
+(define *glyph-glyphs* #f)
+
+(define (glyphlings:kind-list src)
+  (if (pair? *glyph-kinds*)
+    *glyph-kinds*
+    (glyphlings:kind-list-scan src)))
+
+(define (glyphlings:frozen name)
+  (if (not (hash? *glyph-inv*))
+    #f
+    (let ((v (hash-ref *glyph-inv* name)))
+      (if (string? v) v #f))))
+
+(define (glyphlings:cached-glyphs) *glyph-glyphs*)
+
+(define (glyphlings:starts? s pre)
+  (let ((n (string-length pre)))
+    (and (string? s) (>= (string-length s) n) (string=? (substring s 0 n) pre))))
+
+(define (glyphlings:keep-frozen? name)
+  (or (glyphlings:starts? name "letter-")
+      (glyphlings:starts? name "word-")
+      (glyphlings:starts? name "label-")
+      (glyphlings:starts? name "part-")
+      (glyphlings:starts? name "body-")
+      (glyphlings:starts? name "stage0-")
+      (string=? name "expect-blank")
+      (string=? name "zoo-empty")
+      (string=? name "next-spawn")))
+
+(define (glyphlings:inventory-cache! src)
+  (let ((n (string-length src))
+        (i 0)
+        (tab (hash))
+        (kinds (list))
+        (glyphs (list)))
+    (while (lambda () (< i n))
+      (lambda ()
+        (if (and (= (string-ref src i) 40)
+                 (<= (+ i 8) n)
+                 (string=? (substring src i (+ i 8)) "(define "))
+          (let ((start (+ i 8))
+                (j (+ i 8)))
+            (while (lambda () (and (< j n)
+                                   (not (= (string-ref src j) 32))
+                                   (not (= (string-ref src j) 41))))
+              (lambda () (set! j (+ j 1))))
+            (let ((name (substring src start j)))
+              (if (< (+ j 1) n)
+                (let ((body (glyphlings:parse-value src (+ j 1))))
+                  (if (glyphlings:keep-frozen? name)
+                    (hash-set! tab name body)
+                    #t)
+                  (if (glyphlings:starts? name "label-")
+                    (set! kinds (cons (substring name 6 (string-length name)) kinds))
+                    #t)
+                  (if (and (glyphlings:starts? name "part-") (string? body))
+                    (set! glyphs (cons (glyphlings:strip body) glyphs))
+                    #t))
+                #t))
+            (set! i (+ j 1)))
+          (set! i (+ i 1)))))
+    (set! *glyph-kinds* (reverse kinds))
+    (set! *glyph-glyphs* glyphs)
+    (set! *glyph-inv* tab)
+    #t))
 
 (define (glyphlings:define-names src)
   (let ((pos 0) (acc (list)) (n (string-length src)))
@@ -226,30 +371,34 @@
                      (if (> n2 0) (string-append " " best2) "")
                      (if (> n3 0) (string-append " " best3) "")))))
 
-(define (glyphlings:frame src wobble banner misses)
-  (let ((want (glyphlings:inner src "expect"))
-        (head (glyphlings:inner src "creature-head"))
-        (body (glyphlings:inner src "creature-body"))
-        (tail (glyphlings:inner src "creature-tail"))
-        (label (glyphlings:inner src "creature-label"))
-        (zoo (glyphlings:inner src "zoo")))
-    (if (or (not (string? head)) (not (string? want)) (not (string? body))
-            (not (string? tail)) (not (string? label)) (not (string? zoo)))
-      "我们再玩这一只\n"
-      (string-append
-        "\x1b[H\x1b[2J"
+(define (glyphlings:picture want head body tail label zoo wobble banner misses)
+  (if (or (not (string? head)) (not (string? want)) (not (string? body))
+          (not (string? tail)) (not (string? label)) (not (string? zoo)))
+    "我们再玩这一只\n"
+    (string-append
+      "\x1b[H\x1b[2J"
+      (if (and (string? want) (= (string-length want) 1))
+        (string-append "\x1b[1m请按这个键  " want "\x1b[0m\n\n")
+        "看小兽\n\n")
+      "\x1b[33m" (glyphlings:big want) "\x1b[0m\n"
+      head " " body " " tail "   " label "\n"
+      zoo "\n"
+      (if (and (string? banner) (> (string-length banner) 0))
+        (string-append banner "\n")
+        "")
+      (if (equal? wobble #t)
         (if (and (string? want) (= (string-length want) 1))
-          (string-append "\x1b[1m请按这个键  " want "\x1b[0m\n\n")
-          "看小兽\n\n")
-        "\x1b[33m" (glyphlings:big want) "\x1b[0m\n"
-        head " " body " " tail "   " label "\n"
-        zoo "\n"
-        (if (and (string? banner) (> (string-length banner) 0))
-          (string-append banner "\n")
-          "")
-        (if (equal? wobble #t)
-          (if (and (string? want) (= (string-length want) 1))
-            (string-append "再试一次，按 " want "\n")
-            "再试一次\n")
-          "")
-        "\x1b[2m" (glyphlings:tricky misses) "\x1b[0m\n"))))
+          (string-append "再试一次，按 " want "\n")
+          "再试一次\n")
+        "")
+      "\x1b[2m" (glyphlings:tricky misses) "\x1b[0m\n")))
+
+(define (glyphlings:frame src wobble banner misses)
+  (glyphlings:picture
+    (glyphlings:inner src "expect")
+    (glyphlings:inner src "creature-head")
+    (glyphlings:inner src "creature-body")
+    (glyphlings:inner src "creature-tail")
+    (glyphlings:inner src "creature-label")
+    (glyphlings:inner src "zoo")
+    wobble banner misses))

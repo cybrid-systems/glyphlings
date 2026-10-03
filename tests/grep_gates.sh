@@ -9,17 +9,21 @@ if grep -nE '\(eval |\(load |\(shell |http-get|http-post|std/llm|std/net|pheromo
   echo "GLYPHLINGS_FAIL banned call"
   exit 1
 fi
-reb=$(grep -n 'mutate:rebind' aura/*.aura || true)
-case "$reb" in
+rep=$(grep -n 'mutate:replace-value' aura/*.aura || true)
+case "$rep" in
   *aura/driver.aura*) ;;
-  *) echo "GLYPHLINGS_FAIL rebind site"; exit 1 ;;
+  *) echo "GLYPHLINGS_FAIL replace site"; exit 1 ;;
 esac
-echo "$reb" | grep -v 'aura/driver.aura' | grep -q 'mutate:rebind' && {
-  echo "GLYPHLINGS_FAIL rebind outside driver"
+echo "$rep" | grep -v 'aura/driver.aura' | grep -q 'mutate:replace-value' && {
+  echo "GLYPHLINGS_FAIL replace outside driver"
   exit 1
 }
-if ! grep -q 'mutate:rebind' aura/driver.aura; then
-  echo "GLYPHLINGS_FAIL missing rebind"
+if ! grep -q 'mutate:replace-value' aura/driver.aura; then
+  echo "GLYPHLINGS_FAIL missing replace"
+  exit 1
+fi
+if grep -n 'mutate:rebind' aura/*.aura; then
+  echo "GLYPHLINGS_FAIL rebind in aura"
   exit 1
 fi
 sw=$(grep -n 'hot-strategy:swap!' aura/*.aura || true)

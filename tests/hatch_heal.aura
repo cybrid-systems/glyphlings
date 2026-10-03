@@ -18,9 +18,14 @@
 (define id (ast:snapshot "id0"))
 (ok? "id0" (= id 0))
 (define snap-src (current-source :workspace))
-(mutate:atomic-batch
-  (list (list "mutate:rebind" "expect" "\"a\"" "id0"))
-  "id0")
+(define found (query :find "live"))
+(define lit (car (query :children (car found))))
+(define wrote (mutate:atomic-batch
+  (list (list "mutate:replace-value" lit "z" "id0"))
+  "id0"
+  :sync-query-index? #f))
+(ok? "wrote" (equal? wrote #t))
+(ok? "changed" (equal? (equal? snap-src (current-source :workspace)) #f))
 (define restored (ast:restore 0))
 (ok? "restore0" (equal? restored #t))
 (eval-current)
