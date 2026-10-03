@@ -29,6 +29,10 @@
 (define *key-ms* 0)
 (define *coach-seen* "cat dog bee sun fox pig hen ant")
 (define *seed-names* #f)
+(define *staged-text* #f)
+(define *staged-fields* #f)
+(define *staged-old-text* #f)
+(define *staged-old-fields* #f)
 
 (define (glyphlings:key-ms) *key-ms*)
 
@@ -74,12 +78,24 @@
     (set! *key-ms* (- (monotonic-ms) *key-t0*))
     #t)
   (set! *wobble* #f)
-  (set! *banner* ""))
+  (set! *banner* "")
+  (glyphlings:prewarm!))
 
 (define (glyphlings:miss-bump ch)
   (let ((n (glyphlings:miss-get *miss* ch)))
     (hash-set! *miss* ch (if (< n 99) (+ n 1) 99))
     (set! *digits* #f)))
+
+(define (glyphlings:prewarm!)
+  (let ((flag (getenv "GLYPHLINGS_FAST")))
+    (if (and (string? flag) (string=? flag "1"))
+      #t
+      (let ((word (glyphlings:cell "creature-word"))
+            (have (glyphlings:cell "progress")))
+        (if (and (string? word) (number? have) (>= have 0)
+                 (< (+ have 1) (string-length word)))
+          (glyphlings:big (substring word (+ have 1) (+ have 2)))
+          #t)))))
 
 (define (glyphlings:digits)
   (if (string? *digits*)
@@ -355,6 +371,46 @@
                     #t)
                   #f)))))))))
 
+(define (glyphlings:stage! pairs)
+  (if (or (equal? (mutate:boundary-safe?) #f)
+          (equal? (mutate:quota-ok?) #f)
+          (not (equal? (glyphlings:pairs-ok? "" pairs) #t)))
+    #f
+    (let ((fields (glyphlings:apply-pairs pairs)))
+      (if (not (pair? fields))
+        #f
+        (let ((text (glyphlings:join-bar fields)))
+          (set! *staged-old-text* *live-text*)
+          (set! *staged-old-fields* *live-fields*)
+          (set! *staged-text* text)
+          (set! *staged-fields* fields)
+          (glyphlings:remember-live! text fields)
+          #t)))))
+
+(define (glyphlings:flush-stage!)
+  (if (not (string? *staged-text*))
+    #t
+    (let ((text *staged-text*)
+          (fields *staged-fields*)
+          (old-text *staged-old-text*)
+          (old-fields *staged-old-fields*))
+      (set! *staged-text* #f)
+      (set! *staged-fields* #f)
+      (set! *staged-old-text* #f)
+      (set! *staged-old-fields* #f)
+      (if (equal? (glyphlings:write-live! text fields) #t)
+        #t
+        (begin
+          (glyphlings:remember-live! old-text old-fields)
+          (set! *last-fault* "literal")
+          (let ((now (glyphlings:lit-text)))
+            (if (and (string? now) (string? old-text) (not (string=? now old-text)))
+              (glyphlings:dirty!)
+              #t))
+          (set! *wobble* #t)
+          (glyphlings:paint)
+          #f)))))
+
 (define (glyphlings:write-live! text fields)
   (if (or (not (string? text)) (not (pair? fields))
           (not (number? *live-lit*)) (< *live-lit* 0))
@@ -453,7 +509,7 @@
                      (list (string-append "creature-" slot) part)
                      (list "expect" expect-body)
                      (list "progress" (number->string step)))))
-        (if (equal? (glyphlings:commit! pairs) #t)
+        (if (equal? (glyphlings:stage! pairs) #t)
           #t
           (if (string=? *banner* "") (set! *wobble* #t) #t))))))
 
@@ -541,7 +597,7 @@
           (pairs (list
                    (list "expect" expect-body)
                    (list "progress" (number->string step)))))
-      (if (equal? (glyphlings:commit! pairs) #t)
+      (if (equal? (glyphlings:stage! pairs) #t)
         #t
         (if (string=? *banner* "") (set! *wobble* #t) #t)))))
 
@@ -616,7 +672,7 @@
                                  (glyphlings:stage0-body slot))
                            (list "expect" (glyphlings:frozen (string-append "letter-" ch)))
                            (list "progress" (number->string next))))))
-            (let ((r (glyphlings:commit! pairs)))
+            (let ((r (glyphlings:stage! pairs)))
               (if (equal? r #t)
                 #t
                 (if (string=? *banner* "") (set! *wobble* #t) #t)))))))))
@@ -655,6 +711,7 @@
         ((= (string-length line) 1) (glyphlings:on-byte line))
         (#t (set! *wobble* #t)))
       (glyphlings:paint)
+      (glyphlings:flush-stage!)
       #t)))
 
 (define (glyphlings:install! path)

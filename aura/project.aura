@@ -412,7 +412,7 @@
           (not (string? tail)) (not (string? label)) (not (string? zoo)))
     "我们再玩这一只\n"
     (string-append
-      "\x1b[H\x1b[2J"
+      "\x1b[H"
       (if (and (string? want) (= (string-length want) 1))
         (string-append "\x1b[1m请按这个键  " want "\x1b[0m\n")
         "看小兽\n")
@@ -436,7 +436,8 @@
           (string-append "再试一次，按 " want "\n")
           "再试一次\n")
         "")
-      "\x1b[2m" (glyphlings:tricky misses) "\x1b[0m\n")))
+      "\x1b[2m" (glyphlings:tricky misses) "\x1b[0m\n"
+      "\x1b[J")))
 
 (define (glyphlings:frame src wobble banner misses)
   (glyphlings:picture

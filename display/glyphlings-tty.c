@@ -1,4 +1,6 @@
-/* Byte pipe. One code point in, one line out. No words and no pictures. */
+/* Byte pipe. One code point in, one line out.
+   The spell colors are copied from the line the child already painted.
+   This file does not keep its own word list. */
 #define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
@@ -68,6 +70,173 @@ int glyphlings_frame(GlyphFrame *st, unsigned char b, char *out, size_t cap) {
     out[st->have + 1] = '\0';
     st->have = 0;
     st->need = 0;
+    return 1;
+}
+
+#define GLYPHLINGS_SPELL_CAP 8
+#define GLYPHLINGS_SPELL_ROW 15
+
+typedef struct {
+    char letters[GLYPHLINGS_SPELL_CAP];
+    int n;
+    int at;
+    int base_at;
+    char line[480];
+    int linelen;
+    int overflow;
+} GlyphSpell;
+
+void glyphlings_spell_init(GlyphSpell *s) {
+    memset(s, 0, sizeof *s);
+    s->at = -1;
+    s->base_at = -1;
+}
+
+static int spell_line(const char *s, int len, char *letters, int *at_out) {
+    int n = 0;
+    int at = -1;
+    int mode = 0;
+    int i = 0;
+    while (i < len && n < GLYPHLINGS_SPELL_CAP) {
+        if (s[i] == '\x1b' && i + 1 < len && s[i + 1] == '[') {
+            int j = i + 2;
+            int ps = j;
+            while (j < len && s[j] != 'm' && s[j] != 'H' && s[j] != 'J' && s[j] != '\x1b')
+                j++;
+            if (j < len && s[j] == 'm') {
+                int plen = j - ps;
+                if (plen == 2 && s[ps] == '3' && s[ps + 1] == '2')
+                    mode = 1;
+                else if (plen == 2 && s[ps] == '3' && s[ps + 1] == '3')
+                    mode = 2;
+                else if (plen == 1 && s[ps] == '2')
+                    mode = 3;
+                else
+                    mode = 0;
+                i = j + 1;
+                continue;
+            }
+            i = (j < len) ? j + 1 : len;
+            continue;
+        }
+        if (s[i] >= 'a' && s[i] <= 'z' && mode >= 1 && mode <= 3) {
+            if (mode == 2 && at < 0)
+                at = n;
+            letters[n++] = s[i];
+            mode = 0;
+        }
+        i++;
+    }
+    if (n < 3 || n > 5)
+        return 0;
+    if (at < 0)
+        at = n;
+    *at_out = at;
+    return n;
+}
+
+static void spell_take(GlyphSpell *s, const char *letters, int n, int at) {
+    int same = s->n == n && n > 0 && memcmp(s->letters, letters, (size_t)n) == 0;
+    memcpy(s->letters, letters, (size_t)n);
+    s->n = n;
+    if (!same) {
+        s->at = at;
+        s->base_at = at;
+        return;
+    }
+    s->base_at = at;
+    if (s->at < 0 || at > s->at)
+        s->at = at;
+}
+
+int glyphlings_spell_note(GlyphSpell *s, const char *buf, size_t n) {
+    size_t i;
+    int hit = 0;
+    for (i = 0; i < n; i++) {
+        char c = buf[i];
+        if (c == '\n') {
+            if (!s->overflow) {
+                char letters[GLYPHLINGS_SPELL_CAP];
+                int at = -1;
+                int got = spell_line(s->line, s->linelen, letters, &at);
+                if (got > 0) {
+                    spell_take(s, letters, got, at);
+                    hit = 1;
+                }
+            }
+            s->linelen = 0;
+            s->overflow = 0;
+            continue;
+        }
+        if (s->linelen >= (int)sizeof s->line)
+            s->overflow = 1;
+        else
+            s->line[s->linelen++] = c;
+    }
+    return hit;
+}
+
+int glyphlings_spell_ahead(const GlyphSpell *s) {
+    return s->n >= 3 && s->at > s->base_at;
+}
+
+int glyphlings_spell_patch(const GlyphSpell *s, char *out, size_t cap) {
+    int n = 0;
+    int i;
+    int w;
+    if (s->n < 3 || s->at < 0 || cap < 64)
+        return 0;
+    if (s->at < s->n) {
+        w = snprintf(out + n, cap - (size_t)n,
+                     "\x1b[1;1H\x1b[1m请按这个键  %c\x1b[0m\x1b[K",
+                     s->letters[s->at]);
+        if (w < 0 || (size_t)w >= cap - (size_t)n)
+            return 0;
+        n += w;
+    }
+    w = snprintf(out + n, cap - (size_t)n, "\x1b[%d;1H", GLYPHLINGS_SPELL_ROW);
+    if (w < 0 || (size_t)w >= cap - (size_t)n)
+        return 0;
+    n += w;
+    for (i = 0; i < s->n; i++) {
+        const char *open = (i < s->at) ? "\x1b[32m" : (i == s->at) ? "\x1b[1m\x1b[33m" : "\x1b[2m";
+        if (i > 0) {
+            if ((size_t)n + 2 >= cap)
+                return 0;
+            out[n++] = ' ';
+            out[n++] = ' ';
+        }
+        w = snprintf(out + n, cap - (size_t)n, "%s%c\x1b[0m", open, s->letters[i]);
+        if (w < 0 || (size_t)w >= cap - (size_t)n)
+            return 0;
+        n += w;
+    }
+    if ((size_t)n + 3 >= cap)
+        return 0;
+    out[n++] = '\x1b';
+    out[n++] = '[';
+    out[n++] = 'K';
+    out[n] = '\0';
+    return n;
+}
+
+int glyphlings_spell_key(GlyphSpell *s, unsigned char b) {
+    if (b >= 'A' && b <= 'Z')
+        b = (unsigned char)(b - 'A' + 'a');
+    if (b == 8 || b == 127) {
+        if (s->n >= 3 && s->at > 0) {
+            s->at--;
+            return 1;
+        }
+        return 0;
+    }
+    if (b < 'a' || b > 'z')
+        return 0;
+    if (s->n < 3 || s->at < 0 || s->at >= s->n)
+        return 0;
+    if (s->letters[s->at] != (char)b)
+        return 0;
+    s->at++;
     return 1;
 }
 
@@ -157,6 +326,7 @@ int main(void) {
     pid_t kid;
     const char *bin;
     GlyphFrame st;
+    GlyphSpell spell;
     int sent_small = 0;
     int busy = 0;
     int seen = 0;
@@ -202,6 +372,7 @@ int main(void) {
     write_all(STDOUT_FILENO, wake, sizeof wake - 1);
     mkdir_runtime();
     glyphlings_frame_init(&st);
+    glyphlings_spell_init(&spell);
 
     if (!rows_ok()) {
         write_all(to_child[1], "!\n", 2);
@@ -226,7 +397,15 @@ int main(void) {
             ssize_t n = read(from_child[0], buf, sizeof buf);
             if (n <= 0)
                 break;
+            char patch[256];
+            int pn;
             write_all(STDOUT_FILENO, buf, (size_t)n);
+            if (glyphlings_spell_note(&spell, buf, (size_t)n) &&
+                glyphlings_spell_ahead(&spell)) {
+                pn = glyphlings_spell_patch(&spell, patch, sizeof patch);
+                if (pn > 0)
+                    write_all(STDOUT_FILENO, patch, (size_t)pn);
+            }
             busy = 0;
             seen = 1;
         }
@@ -253,8 +432,14 @@ int main(void) {
             }
             sent_small = 0;
             if (glyphlings_frame(&st, b, line, sizeof line) == 1) {
-                static const char ack[] = "\x1b[15;1H\x1b[32m按到啦，等一等\x1b[0m";
-                write_all(STDOUT_FILENO, ack, sizeof ack - 1);
+                char patch[256];
+                int pn;
+                /* The child repaints after the workspace write. Color this letter first. */
+                if (glyphlings_spell_key(&spell, b)) {
+                    pn = glyphlings_spell_patch(&spell, patch, sizeof patch);
+                    if (pn > 0)
+                        write_all(STDOUT_FILENO, patch, (size_t)pn);
+                }
                 write_all(to_child[1], line, strlen(line));
                 busy = 1;
             }
